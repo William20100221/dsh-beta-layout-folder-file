@@ -1,13 +1,12 @@
 # dsh-claude-layout
 
-A [DeepSeek Harness](https://github.com/deepseek-ai) plugin that gives the sidebar a Claude-style Workspaces list:
+A [DeepSeek Harness](https://github.com/deepseek-ai) plugin that adds **folders** to the sidebar's Workspaces list, with Claude-style drag effects. DSH's own list stays exactly as it is: every workspace row, session row, hover button, menu, hover card, search and view option is DSH's built-in UI.
 
-- **Folders for workspaces.** Make a folder, give it a title, and put as many workspaces in it as you like (for example *School* holding *Maths*, *Physics* and *Chemistry*). Folders collapse, rename and delete; deleting a folder only ungroups its workspaces.
-- **Drag and drop.** Drag a workspace onto a folder to file it, or between rows to reorder. Drag folders to reorder them. While you drag, the item lifts into a floating pill, the rest of the list dims, and rows slide aside to show where it will land.
-- **Pinned section.** Drag a session to the top and a *Pinned · Drop here* zone appears; drop it there to pin it. Drag a pinned session back out to unpin it.
-- **Sessions under each workspace**, newest first, with running / waiting / done dots and short times (`5m`, `3h`, `2d`). Hover a row for **⋯** (pin, rename, archive) or the workspace's **+** (new session).
+- **Folders for workspaces.** Click the folder-plus button in the Workspaces header, type a title, and you have a folder (for example *School*). Folders collapse, rename, delete and reorder; deleting a folder only ungroups its workspaces.
+- **Filing by drag.** Drag a workspace onto a folder header to put it in that folder. Drop it among a folder's workspaces and it joins that folder; drop it among the loose workspaces and it leaves. Drag a folder header to reorder folders.
+- **Drag effects.** While dragging, the item becomes a floating pill, the rest of the list dims, the lifted row fades, and the folder under the pointer lights up. DSH's own insert line and settle animation still show where it lands.
 
-Folder layout is saved in this app's browser storage, so it stays across restarts on this computer.
+Folders sit above loose workspaces. Their order is kept in DSH's own saved workspace order, so other DSH screens (like the workspace picker on the new-session page) list them in the same order. Folder names and membership are saved in this app's browser storage on this computer.
 
 ## Install
 
@@ -25,18 +24,19 @@ Remove it the same way:
 & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop remove dsh-claude-layout
 ```
 
-Removing the plugin brings back DSH's built-in Workspace list; your workspaces and sessions are never changed by this plugin, only how they are grouped on screen.
+The plugin never changes workspaces or sessions themselves, only how they are grouped and ordered in the sidebar.
 
-## What it doesn't do (yet)
+## Limits
 
-- No view options menu (group by tree / flat list, manual ordering, show archived). Sessions are sorted by last update.
-- Search filters by session and workspace title only, not by conversation content.
-- The `Ctrl+K` search shortcut still targets DSH's built-in list, which this plugin hides.
-- No fork or "copy session ID" in the row menu, and no delete-workspace action.
+- Folders show in DSH's grouped view. In the flat list and in search results they are hidden (the workspaces are still there).
+- In the **Workspace Tree** view only top-level workspaces can be filed.
+- Folders always sit above loose workspaces.
 
 ## How it works
 
-`lib/client.js` registers a component into the sidebar's `sidebar.workspaces` seat at priority `-1`, which shadows the built-in browser while the plugin is on. It reads workspaces and sessions through DSH's own hooks and acts through the `uiWorkspace`, `workspaces` and `sessions` services, so pin, archive, rename and open behave exactly like the built-in list. The file is hand-written in DSH's client-bundle format, so there is no build step.
+`lib/client.js` doesn't register any UI of its own into DSH's slots. It finds DSH's Workspace list (`[role="tree"]` next to the `sidebar.workspaces.directoryFlow` seat), inserts folder headers before each folder's first workspace, tags member sections so CSS can indent or hide them, and calls DSH's `workspaces.insertBefore` to keep each folder's workspaces together. A capture-phase listener on DSH's native drag events sets the pill drag image and records which folder a workspace was dropped into. If a DSH update changes that list, the folders stop showing and DSH's list keeps working as normal.
+
+The file is hand-written in DSH's client-bundle format, so there is no build step.
 
 ```sh
 npm test

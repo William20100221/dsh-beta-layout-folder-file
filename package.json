@@ -1,7 +1,7 @@
 {
   "name": "dsh-claude-layout",
-  "version": "0.1.0",
-  "description": "DeepSeek Harness plugin: Claude-style Workspaces sidebar with folders that group workspaces, a Pinned section, and drag-and-drop",
+  "version": "0.2.0",
+  "description": "DeepSeek Harness plugin: folders for the Workspaces sidebar with Claude-style drag effects, keeping DSH's own UI",
   "type": "module",
   "main": "index.js",
   "exports": {
