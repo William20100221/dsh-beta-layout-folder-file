@@ -1,0 +1,3 @@
+- insert:
+    - id: claude-layout
+      name: dsh-claude-layout
