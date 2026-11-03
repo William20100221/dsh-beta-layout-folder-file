@@ -1,6 +1,6 @@
 {
   "name": "dsh-beta-layout-folder-file",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "DeepSeek Harness plugin: folders, a fork tree, Claude-style drag effects, ZIP export and AI titles for the Workspaces sidebar, keeping DSH's own UI",
   "type": "module",
   "main": "index.js",

@@ -23,9 +23,12 @@ test('folders group their workspaces above loose ones, keeping DSH order inside'
   assert.deepEqual(lib.desiredOrder(['essay', 'robot', 'maths', 'chem', 'phys'], state), ['maths', 'phys', 'robot', 'essay', 'chem'])
 })
 
-test('a workspace dropped on a folder header goes to the end of that folder', () => {
+test('a dropped workspace lands where DSH would put it', () => {
   const state = lib.assign(lib.assign(lib.addFolder({ folders: [] }, 's', 'School'), 'b', 's'), 'a', 's')
-  assert.deepEqual(lib.desiredOrder(['a', 'b', 'c'], state, 'a'), ['b', 'a', 'c'])
+  assert.deepEqual(lib.desiredOrder(['a', 'b', 'c'], state, { id: 'a', before: null }), ['b', 'a', 'c'], 'header drop: end of folder')
+  assert.deepEqual(lib.desiredOrder(['a', 'b', 'c', 'd'], lib.assign(state, 'd', 's'), { id: 'd', before: 'b' }), ['a', 'd', 'b', 'c'], 'slot above b')
+  assert.deepEqual(lib.desiredOrder(['a', 'b', 'c', 'd'], state, { id: 'd', before: 'c' }), ['a', 'b', 'd', 'c'], 'loose: slot above c')
+  assert.deepEqual(lib.desiredOrder(['a', 'b', 'c'], state, { id: 'c', before: 'a' }), ['a', 'b', 'c'], 'pin outside its group is ignored')
 })
 
 test('planMoves reaches the target with the fewest moves', () => {
