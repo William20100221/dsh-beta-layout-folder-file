@@ -1,7 +1,7 @@
 {
-  "name": "dsh-claude-layout",
-  "version": "0.2.0",
-  "description": "DeepSeek Harness plugin: folders for the Workspaces sidebar with Claude-style drag effects, keeping DSH's own UI",
+  "name": "dsh-beta-layout-folder-file",
+  "version": "0.3.0",
+  "description": "DeepSeek Harness plugin: folders, a fork tree, Claude-style drag effects, ZIP export and AI titles for the Workspaces sidebar, keeping DSH's own UI",
   "type": "module",
   "main": "index.js",
   "exports": {
@@ -12,12 +12,13 @@
   "files": [
     "index.js",
     "lib/client.js",
+    "lib/title.js",
     "cordis.patch.yml",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --test test/client.test.js"
+    "test": "node --test test/client.test.js test/title.test.js"
   },
   "keywords": [
     "dsh-plugin",
@@ -25,12 +26,17 @@
     "deepseek",
     "sidebar",
     "workspaces",
-    "folders"
+    "folders",
+    "export",
+    "titles"
   ],
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/William20100221/dsh-claude-layout.git"
+    "url": "git+https://github.com/William20100221/dsh-beta-layout-folder-file.git"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/dsh-session-title-llm": ">=0.2.1-rc.1 <0.3.0"
   },
   "dsh": {
     "bundle": {
@@ -41,7 +47,9 @@
       "inject": [
         "@deepseek-ai/dsh-client-ui-sidebar",
         "@deepseek-ai/dsh-client-ui-workspace",
+        "@deepseek-ai/dsh-client-ui-plugin-manager",
         "@deepseek-ai/dsh-client-ui-slots",
+        "@deepseek-ai/dsh-client-ui-primitives",
         "@deepseek-ai/dsh-client-locale"
       ]
     }

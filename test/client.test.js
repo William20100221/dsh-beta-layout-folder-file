@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs'
 let registration
 globalThis.window = { __ModuleLoader__: { load: (r) => (registration = r) } }
 new Function(readFileSync(new URL('../lib/client.js', import.meta.url), 'utf8'))()
-const lib = registration.factory(() => ({}))
+const lib = registration.factory((name) => (name === 'react' ? { createElement: () => null } : {}))
 
 const apply = (order, moves) => {
   const out = [...order]
@@ -61,7 +61,7 @@ test('folders reorder, delete without touching workspaces, and prune gone ones',
 test('store survives a reload and ignores junk', () => {
   const data = new Map()
   const storage = { getItem: (k) => data.get(k) ?? null, setItem: (k, v) => data.set(k, v) }
-  lib.createStore(storage).set(lib.updateFolder(lib.addFolder({ folders: [] }, 'x', 'X'), 'x', { title: 'Past Papers' }))
+  lib.createStore(storage).set(lib.updateFolder(lib.addFolder({ folders: [], collapsedSessions: {} }, 'x', 'X'), 'x', { title: 'Past Papers' }))
   assert.equal(lib.createStore(storage).get().folders[0].title, 'Past Papers')
   data.set('dsh-claude-layout:v2', '{oops')
   assert.deepEqual(lib.createStore(storage).get().folders, [])
@@ -71,4 +71,24 @@ test('folders made with 0.1.0 carry over', () => {
   const old = { entries: ['w:a', 'f:x'], folders: { x: { title: 'School', children: ['b', 'c'] } }, collapsed: { 'f:x': true } }
   const storage = { getItem: (k) => (k === 'dsh-claude-layout:v1' ? JSON.stringify(old) : null), setItem: () => {} }
   assert.deepEqual(lib.createStore(storage).get().folders, [{ id: 'x', title: 'School', collapsed: true, members: ['b', 'c'] }])
+  assert.deepEqual(lib.createStore(storage).get().collapsedSessions, {})
+})
+
+test('treeOrder nests forks under their source, depth-first, marking last children', () => {
+  const parent = { b: 'a', c: 'a', d: 'c', e: 'zzz' }
+  const out = lib.treeOrder(['e', 'd', 'b', 'a', 'c'], (id) => parent[id])
+  assert.deepEqual(out.map((n) => [n.id, n.depth, n.last, n.parent]), [
+    ['e', 0, false, false],
+    ['a', 0, false, true],
+    ['b', 1, false, false],
+    ['c', 1, true, true],
+    ['d', 2, true, false]
+  ])
+})
+
+test('toggleSessionCollapsed flips one session and keeps the rest', () => {
+  let state = lib.toggleSessionCollapsed({ folders: [], collapsedSessions: {} }, 'a')
+  state = lib.toggleSessionCollapsed(state, 'b')
+  assert.deepEqual(state.collapsedSessions, { a: true, b: true })
+  assert.deepEqual(lib.toggleSessionCollapsed(state, 'a').collapsedSessions, { b: true })
 })
