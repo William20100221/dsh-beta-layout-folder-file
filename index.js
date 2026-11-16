@@ -1,25 +1,33 @@
 /**
  * dsh-beta-layout-folder-file, Host half: AI titles for whole conversations.
- * - `/api/dsh-beta-layout` route for the browser: read/write the one setting, generate a title.
- * - With `autoTitle` on, every finished turn (`turn/end`) retitles the session from the whole
- *   conversation, through the same LLM helper DSH's own first-prompt titles use.
- * The sidebar (folders, tree, drag effects, export) lives in lib/client.js.
+ * - One Connection route, POST /api/dsh-beta-layout { method, payload }: the setting, and title generation
+ *   for the ⋯ menu. The browser half calls it document-relative, cookie-authenticated like DSH's export.
+ * - With `autoTitle` on, every finished turn (`turn/end`) of a user-facing session retitles it from the whole
+ *   conversation, through the same LLM helper DSH's own first-message titles use.
+ * Why not a title provider: DSH's title service seats exactly one provider and the base bundle already fills
+ * it (first-prompt). Why `rename()`: it pins the title, which is the feature (DSH's one-off title must not
+ * replace a title made from the whole conversation). A title the user typed is recognised by not being the
+ * last one this plugin set, and is never replaced.
+ * The sidebar (folders, tree, drag effects, menus) lives in lib/client.js, built from src/client/.
  */
-
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { homedir } from 'node:os'
-import { join } from 'node:path'
 
 import { executeSessionTitleLlm, resolveSessionTitleLlmConfig } from '@deepseek-ai/dsh-session-title-llm'
 
-import { conversationOf, frameConversation, titleFromOutput } from './lib/title.js'
+import { normalizeSettings, readSettings, settingsPath, writeSettings } from './src/host/settings.js'
+import { conversationOf, frameConversation, titleFromOutput } from './src/host/title.js'
 
 export const name = 'beta-layout'
 export const inject = ['connection', 'sessions', 'sessionTitle', 'llm']
 
 const ROUTE = '/api/dsh-beta-layout'
 const PROVIDER = 'dsh-beta-layout-folder-file'
-const LLM = resolveSessionTitleLlmConfig({ maxInputBytes: 24000, maxOutputTokens: 64, timeoutMs: 30000 })
+const LIMITS = {
+  maxInputBytes: 24000, // the framed conversation (title.js keeps it near 12 KB)
+  maxOutputTokens: 64, // a title
+  timeoutMs: 30000,
+  debounceMs: 1500 // after turn/end, so a quick follow-up turn does not title twice
+}
+const LLM = resolveSessionTitleLlmConfig({ maxInputBytes: LIMITS.maxInputBytes, maxOutputTokens: LIMITS.maxOutputTokens, timeoutMs: LIMITS.timeoutMs })
 const SYSTEM = [
   'Create a concise title for an AI coding-assistant session from the supplied conversation.',
   'Return only the title on one line, in plain natural language, with no quotes, prefix, explanation, Markdown, XML, or code.',
@@ -27,70 +35,79 @@ const SYSTEM = [
   'Aim for about 6 words in non-CJK languages or 12 CJK characters.'
 ].join('\n')
 
-const settingsPath = () => join(process.env.DSH_HOME || join(homedir(), '.dsh'), 'dsh-beta-layout-folder-file.json')
-
-function readSettings() {
-  try {
-    const value = JSON.parse(readFileSync(settingsPath(), 'utf8'))
-    return { autoTitle: value?.autoTitle === true }
-  } catch {
-    return { autoTitle: false }
-  }
-}
-
-function writeSettings(settings) {
-  mkdirSync(join(settingsPath(), '..'), { recursive: true })
-  writeFileSync(settingsPath(), JSON.stringify(settings, null, 2))
-}
+const ok = (value) => ({ ok: true, value })
+const fail = (code, message) => ({ ok: false, error: { code, message } })
 
 export function apply(ctx) {
-  let settings = readSettings()
-  const inflight = new Map()
+  const path = settingsPath()
+  let settings = readSettings(path)
+  const lastSet = new Map() // sessionId → the title this plugin set last; a different user-sourced title is a manual rename
+  const inflight = new Map() // sessionId → { work, controller, rerun }
+  const timers = new Map()
+  const isSubagent = (session) => session.header?.origin === 'subagent'
 
   async function generate(session, signal) {
     const turns = conversationOf(session.snapshotEvents())
     if (turns.length === 0) throw new Error('the session has no messages yet')
-    const header = session.requestHeader()?.config
-    if (!header?.provider || !header?.model) throw new Error('send a message in this session first, so a model route is known')
-    const response = await executeSessionTitleLlm(ctx, LLM, { session, signal, route: { provider: header.provider, model: header.model } }, PROVIDER, {
+    const route = session.requestHeader()?.config
+    if (!route?.provider || !route?.model) throw new Error('send a message in this session first, so a model route is known')
+    const current = ctx.sessionTitle.get(session)
+    const response = await executeSessionTitleLlm(ctx, LLM, { session, signal, route: { provider: route.provider, model: route.model } }, PROVIDER, {
       system: SYSTEM,
-      input: frameConversation(turns),
+      input: frameConversation(turns, { currentTitle: current?.title }),
       messageSeqs: turns.map((turn) => turn.seq),
       selectReasoningEffort: (model) => model.reasoning?.efforts[0]?.id
     })
     if (response.finish.kind !== 'stop') throw new Error(`title generation finished with ${response.finish.kind}`)
     const title = titleFromOutput(response.blocks.filter((block) => block.type === 'text').map((block) => block.text).join(' '))
     if (title.length === 0) throw new Error('the model returned no title')
-    ctx.sessionTitle.rename(session, title)
+    if (ctx.sessions.get(session.id) !== session) throw new Error('the session was closed meanwhile')
+    if (title !== current?.title) ctx.sessionTitle.rename(session, title)
+    lastSet.set(session.id, title)
     return title
   }
 
-  /** One generation per session at a time; a request during one waits for it and runs again after. */
+  /** One generation per session at a time; a request during one makes it run once more afterwards. */
   function generateOnce(session) {
     const running = inflight.get(session.id)
-    if (running) return running
-    const controller = new AbortController()
-    const work = generate(session, controller.signal).finally(() => inflight.delete(session.id))
-    inflight.set(session.id, work)
-    return work
+    if (running !== undefined) {
+      running.rerun = true
+      return running.work
+    }
+    const entry = { controller: new AbortController(), rerun: false }
+    const run = () => generate(session, entry.controller.signal)
+    entry.work = run()
+      .then((title) => (entry.rerun ? run() : title))
+      .finally(() => {
+        if (inflight.get(session.id) === entry) inflight.delete(session.id)
+      })
+    inflight.set(session.id, entry)
+    return entry.work
+  }
+
+  /** A title the user typed (user-sourced, and not the one this plugin set) wins over auto titles. */
+  const manuallyTitled = (session) => {
+    const current = ctx.sessionTitle.get(session)
+    return current?.source?.kind === 'user' && current.title !== lastSet.get(session.id)
   }
 
   const endpoints = {
     'settings.get': async () => settings,
     'settings.set': async (payload) => {
-      settings = { autoTitle: payload?.autoTitle === true }
-      writeSettings(settings)
+      const next = normalizeSettings(payload)
+      writeSettings(path, next)
+      settings = next
       return settings
     },
     'title.generate': async (payload) => {
       const session = ctx.sessions.get(String(payload?.sessionId ?? ''))
       if (session === undefined) throw new Error('the session is not open')
+      if (isSubagent(session)) throw new Error('subagent sessions keep their own titles')
       return { title: await generateOnce(session) }
     }
   }
 
-  // One exact Fetch route on Connection (the registry DSH's own session export uses): POST { method, payload }.
-  const route = {
+  ctx.connection.fetch.register({
     path: ROUTE,
     methods: ['POST'],
     requestBody: 'buffered',
@@ -100,28 +117,36 @@ export function apply(ctx) {
         body = await request.json()
       } catch {}
       const run = Object.hasOwn(endpoints, body?.method) ? endpoints[body.method] : undefined
-      const result = run === undefined ? { ok: false, error: { code: 'bad-request', message: `unknown method ${String(body?.method)}` } } : await run(body.payload ?? {}).then(
-        (value) => ({ ok: true, value }),
-        (error) => ({ ok: false, error: { code: 'internal', message: error instanceof Error ? error.message : String(error) } })
-      )
+      const result = run === undefined ? fail('bad-request', `unknown method ${String(body?.method)}`) : await run(body.payload ?? {}).then(ok, (error) => fail('internal', error instanceof Error ? error.message : String(error)))
       return new Response(JSON.stringify(result), { status: 200, headers: { 'content-type': 'application/json' } })
     }
-  }
-  Reflect.get(ctx, 'connection').fetch.register(route)
+  })
 
-  // Auto mode: retitle after each finished turn of a user-facing session.
-  const timers = new Map()
   ctx.on('session/event', (session, event) => {
-    if (!settings.autoTitle || event.type !== 'turn/end' || session.meta?.origin === 'subagent') return
+    if (!settings.autoTitle || event.type !== 'turn/end' || isSubagent(session)) return
     clearTimeout(timers.get(session.id))
     timers.set(
       session.id,
       setTimeout(() => {
         timers.delete(session.id)
-        if (ctx.sessions.get(session.id) !== session) return
+        if (ctx.sessions.get(session.id) !== session || manuallyTitled(session)) return
         generateOnce(session).catch((error) => ctx.logger?.warn?.('[dsh-beta-layout] auto title failed:', error))
-      }, 1500)
+      }, LIMITS.debounceMs)
     )
   })
-  ctx.effect(() => () => timers.forEach((timer) => clearTimeout(timer)), 'dsh-beta-layout: timers')
+  ctx.on('session/disposed', (session) => {
+    clearTimeout(timers.get(session.id))
+    timers.delete(session.id)
+    inflight.get(session.id)?.controller.abort()
+    lastSet.delete(session.id)
+  })
+  ctx.effect(
+    () => () => {
+      for (const timer of timers.values()) clearTimeout(timer)
+      timers.clear()
+      for (const entry of inflight.values()) entry.controller.abort()
+      lastSet.clear()
+    },
+    'dsh-beta-layout: titles'
+  )
 }

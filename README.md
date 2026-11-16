@@ -4,41 +4,46 @@
 
 English | [中文](README.zh.md)
 
-![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![DSH 0.2](https://img.shields.io/badge/DeepSeek%20Harness-0.2.x-4d6bfe) ![No build step](https://img.shields.io/badge/build-none-brightgreen)
+![License: MIT](https://img.shields.io/badge/license-MIT-blue) ![DSH 0.2.2](https://img.shields.io/badge/DeepSeek%20Harness-0.2.2%2B-4d6bfe) ![No build step needed to install](https://img.shields.io/badge/install-no%20build-brightgreen)
 
-Lots of workspaces and forked chats turn DSH's sidebar into one long list. This plugin lets you group workspaces into folders, shows forks as a tree under the chat they came from, and makes dragging feel like Claude's sidebar. It doesn't replace anything: every row, button, menu and hover card is still DSH's own.
+Lots of workspaces and forked chats turn DSH's sidebar into one long list. This plugin lets you group workspaces into folders, shows forks as a tree under the chat they came from, and makes dragging feel like Claude's sidebar. DSH's own rows, menus, search and hover cards stay exactly as they are; the plugin only adds to them.
 
 ```
 Workspaces                  🔍  📁+  ⚙  ＋
-School ▾                                      ← your folder
+📚 School ▾                                   ← your folder (a leading emoji becomes its icon)
    📂 Maths
         Calculus past papers           5h
         Complex numbers  ▾             9h     ← has forks
         ├ Complex numbers (fork)       1d
         └ Complex numbers (fork 2)     2d
    📁 Physics
-Robotics ▸                          2         ← collapsed folder
+Robotics ▸                          2         ← collapsed folder, 2 workspaces
 📁 Default workspace
 ```
 
 ## Features
 
 **Organise**
-- 📁 **Folders for workspaces.** Give a folder any name (*School*, *Robotics*, *Clients*…) and put as many workspaces in it as you like. Folders collapse, rename, reorder and delete. Deleting a folder only ungroups it; nothing inside is lost.
-- 🌳 **Fork tree.** A forked chat sits under the chat it came from, joined by a connector line. Click the ▾ to fold the forks away.
+- 📁 **Folders for workspaces.** Make a folder with the folder-plus button, or right-click a workspace → **Move to folder › New folder…**. Give it any name; start the name with an emoji to give it an icon. Folders collapse, rename (double-click or F2), reorder by dragging their headers, and delete; deleting only ungroups.
+- 🖱️ **Move to folder** from the workspace's own right-click / ⋯ menu, with **Remove from folder**: no dragging needed.
+- ➕ **Add a workspace straight into a folder** with the **+** on its header (or its menu): DSH's folder picker opens and the new workspace lands in that folder.
+- 🌳 **Fork tree.** A forked chat sits under the chat it came from, joined by a connector line. The ▾ on the source folds its forks and shows how many are hidden.
+- ↩️ **Undo.** Every move and folder deletion shows a toast with **Undo**.
+- ⌥ **Alt+click** a folder header to fold or unfold all folders at once (also in the folder's menu).
 
 **Feel**
-- ✋ **Claude-style dragging.** The item lifts into a floating pill, the list dims, rows slide apart around a dashed slot, and a folder lights up when you hover it. Drop on the slot and the item lands right there.
-- 📜 **Scrolling titles.** Hover a title that's too long and it keeps scrolling back and forth, so you can read all of it.
+- ✋ **Claude-style dragging.** The item lifts into a floating pill, the list dims, rows slide apart around a dashed slot where the drop will land, and a folder lights up when you hover it. Hover a **collapsed** folder while dragging and it springs open; drag near the top or bottom edge and the list scrolls.
+- 📜 **Scrolling titles.** Hover (or focus) a title that's too long and it scrolls to the end and back, twice, so you can read all of it.
+- ⌨️ **Keyboard.** Tab to a folder header; Enter/Space folds it, ←/→ fold/unfold, F2 renames, Delete removes it (with Undo), ↑/↓/Home/End walk the list. Shift+F10 or right-click opens the folder's menu. Works with a screen reader and on touch screens (long-press for the menu).
 
-**Do more** (in each chat's **⋯** menu)
-- 📦 **Export as ZIP.** Saves the chat with its sub-chats and attached files to your computer.
-- ✨ **Generate title.** The chat's own model reads the whole conversation and gives it a short title. DSH by itself only names a chat once, from the first message.
-- ⚙️ **Auto titles** (optional). Turn on *Generate an AI title after every reply* on the plugin's page under **Plugins**, and titles stay up to date as the conversation moves on.
+**Do more** (in each chat's **⋯** / right-click menu)
+- 📦 **Export as ZIP.** Saves the chat with its sub-chats and attached files to your computer, through DSH's own export.
+- ✨ **Generate title.** The chat's own model reads the whole conversation and gives it a short title. DSH by itself names a chat once, from its first message. Greyed out on chats that haven't started.
+- ⚙️ **Auto titles** (optional). Turn on *Generate an AI title after every reply* on the plugin's page under **Plugins**. A title you typed yourself is never replaced, and a title that still fits is kept rather than churned.
 
 ## Install
 
-Open **PowerShell** and run:
+Needs DeepSeek Harness **0.2.2 or newer**. Open **PowerShell** and run:
 
 ```powershell
 & "$env:LOCALAPPDATA\Programs\DeepSeek Harness\resources\runtime\cli\bin\dsh.cmd" plugin --profile desktop add github:William20100221/dsh-beta-layout-folder-file
@@ -48,9 +53,9 @@ Then **restart DeepSeek Harness**: quit it from the tray icon and open it again.
 
 ## Your first folder
 
-1. Click the **folder-plus** button in the Workspaces header.
+1. Click the **folder-plus** button in the Workspaces header (or right-click a workspace → **Move to folder › New folder…**).
 2. Type a name and press **Enter**.
-3. Drag a workspace onto the folder header. To take it out again, drag it back among the loose workspaces.
+3. Drag a workspace onto the folder header, or use **Move to folder** in its menu. To take it out, drag it back among the loose workspaces or choose **Remove from folder**.
 
 ## FAQ
 
@@ -77,28 +82,19 @@ The sidebar goes straight back to normal.
 - Folders and the fork tree appear in DSH's normal grouped view. The flat list and search results stay as DSH draws them.
 - In **Workspace Tree** view, only top-level workspaces can go into folders.
 - Folders always sit above loose workspaces.
-- A generated title is kept: DSH's own first-message title won't overwrite it.
+- Titles the plugin generates are pinned, so DSH's own first-message title won't overwrite them.
 
 ## For developers
 
-The plugin has two halves and no build step; both are hand-written in DSH's plugin format.
-
-- **Browser half (`lib/client.js`)** draws no UI of its own over DSH's list. It finds the Workspace list (`[role="tree"]` next to the `sidebar.workspaces.directoryFlow` seat) and does four things:
-  - inserts folder headers, and tags member sections so CSS can indent or hide them;
-  - moves forked chats under their source (`parentId`);
-  - keeps each folder's workspaces together through DSH's `workspaces.insertBefore`;
-  - restyles DSH's native drag events with a pill image and the dashed slot.
-
-  It also adds two rows to `sidebar.workspaces.session.menu.item` and a form to `plugins.bundle.config`.
-- **Host half (`index.js`)** registers `POST /api/dsh-beta-layout` on DSH's Connection for the setting and title generation, and listens for `turn/end` to run auto titles. Titles go through `@deepseek-ai/dsh-session-title-llm`, the helper DSH uses for its own titles, and are applied with `ctx.sessionTitle.rename`.
-
-If a DSH update changes the sidebar's markup, folders and the tree simply stop showing, and DSH's list keeps working.
-
-```sh
-npm test
+```
+src/client/   the browser half as plain ES modules (DOM-free: constants, dsh-dom, model, store, host, util;
+              features: actions, order-sync, folders, tree, drag, marquee, keyboard, titles, menus, slots, overlay)
+src/host/     the host half's pure parts (settings file, title framing)
+index.js      the host entry: one Connection route and the auto-title listener
+lib/client.js GENERATED from src/client by scripts/build.js — commit it; DSH loads it as one script
 ```
 
-Issues and pull requests are welcome.
+`node scripts/build.js` rebuilds the bundle; `npm test` checks it is current and runs the unit tests (no DSH needed). Everything the plugin assumes about DSH's markup is in `src/client/dsh-dom.js`.
 
 ## License
 
