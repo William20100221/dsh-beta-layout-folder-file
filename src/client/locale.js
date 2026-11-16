@@ -36,7 +36,6 @@ export const en = {
   autoTitle: 'Generate an AI title after every reply',
   autoTitleHint:
     'Off: DSH titles a session once, from its first message. Use "Generate title" in a session’s ⋯ menu to retitle it from the whole conversation. A title you typed yourself is never replaced.',
-  summary: 'Folders, fork tree, drag effects, ZIP export and AI titles for the Workspaces sidebar'
 }
 
 export const zh = {
@@ -68,5 +67,4 @@ export const zh = {
   titleFailed: '无法生成标题',
   autoTitle: '每次回复后自动生成 AI 标题',
   autoTitleHint: '关闭时，DSH 只会根据第一条消息为会话命名一次。可在会话的 ⋯ 菜单中选择“生成标题”，根据整段对话重新命名。你自己输入的标题不会被替换。',
-  summary: '为工作区侧栏添加文件夹、分支树、拖拽效果、ZIP 导出和 AI 标题'
 }

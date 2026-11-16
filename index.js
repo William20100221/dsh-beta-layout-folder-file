@@ -6,14 +6,15 @@
  *   conversation, through the same LLM helper DSH's own first-message titles use.
  * Why not a title provider: DSH's title service seats exactly one provider and the base bundle already fills
  * it (first-prompt). Why `rename()`: it pins the title, which is the feature (DSH's one-off title must not
- * replace a title made from the whole conversation). A title the user typed is recognised by not being the
- * last one this plugin set, and is never replaced.
+ * replace a title made from the whole conversation). DSH records a plugin rename and a user rename the same
+ * way, so the last title this plugin set is remembered on disk; a session whose title differs from it was
+ * renamed by the user and is left alone.
  * The sidebar (folders, tree, drag effects, menus) lives in lib/client.js, built from src/client/.
  */
 
 import { executeSessionTitleLlm, resolveSessionTitleLlmConfig } from '@deepseek-ai/dsh-session-title-llm'
 
-import { normalizeSettings, readSettings, settingsPath, writeSettings } from './src/host/settings.js'
+import { normalizeSettings, readState, rememberTitle, settingsPath, writeState } from './src/host/settings.js'
 import { conversationOf, frameConversation, titleFromOutput } from './src/host/title.js'
 
 export const name = 'beta-layout'
@@ -37,37 +38,50 @@ const SYSTEM = [
 
 const ok = (value) => ({ ok: true, value })
 const fail = (code, message) => ({ ok: false, error: { code, message } })
+const isAbort = (error) => error?.name === 'AbortError' || error?.code === 'ABORT_ERR'
 
 export function apply(ctx) {
   const path = settingsPath()
-  let settings = readSettings(path)
-  const lastSet = new Map() // sessionId → the title this plugin set last; a different user-sourced title is a manual rename
+  let state = readState(path)
   const inflight = new Map() // sessionId → { work, controller, rerun }
   const timers = new Map()
   const isSubagent = (session) => session.header?.origin === 'subagent'
+  const isLive = (session) => ctx.sessions.get(session.id) === session
+
+  /** A title the user typed: user-sourced and not the one this plugin set last. */
+  const manuallyTitled = (session) => {
+    const current = ctx.sessionTitle.get(session)
+    return current?.source?.kind === 'user' && current.title !== state.titled[session.id]
+  }
 
   async function generate(session, signal) {
     const turns = conversationOf(session.snapshotEvents())
     if (turns.length === 0) throw new Error('the session has no messages yet')
     const route = session.requestHeader()?.config
     if (!route?.provider || !route?.model) throw new Error('send a message in this session first, so a model route is known')
-    const current = ctx.sessionTitle.get(session)
+    const before = ctx.sessionTitle.get(session)
     const response = await executeSessionTitleLlm(ctx, LLM, { session, signal, route: { provider: route.provider, model: route.model } }, PROVIDER, {
       system: SYSTEM,
-      input: frameConversation(turns, { currentTitle: current?.title }),
+      input: frameConversation(turns, { currentTitle: before?.title }),
       messageSeqs: turns.map((turn) => turn.seq),
       selectReasoningEffort: (model) => model.reasoning?.efforts[0]?.id
     })
     if (response.finish.kind !== 'stop') throw new Error(`title generation finished with ${response.finish.kind}`)
     const title = titleFromOutput(response.blocks.filter((block) => block.type === 'text').map((block) => block.text).join(' '))
     if (title.length === 0) throw new Error('the model returned no title')
-    if (ctx.sessions.get(session.id) !== session) throw new Error('the session was closed meanwhile')
-    if (title !== current?.title) ctx.sessionTitle.rename(session, title)
-    lastSet.set(session.id, title)
-    return title
+    if (!isLive(session)) throw new Error('the session was closed meanwhile')
+    // The user may have typed a title while the model was thinking: theirs wins.
+    const now = ctx.sessionTitle.get(session)
+    if (now?.source?.kind === 'user' && now.title !== before?.title && now.title !== state.titled[session.id]) throw new Error('the session was renamed meanwhile')
+    // DSH normalises what it stores (whitespace, length); remember that form so the two compare equal later.
+    const accepted = title === now?.title ? now : ctx.sessionTitle.rename(session, title)
+    const stored = accepted?.title ?? title
+    state = { ...state, titled: rememberTitle(state.titled, session.id, stored) }
+    writeState(path, state)
+    return stored
   }
 
-  /** One generation per session at a time; a request during one makes it run once more afterwards. */
+  /** One generation per session at a time; requests during one make it run again until none is pending. */
   function generateOnce(session) {
     const running = inflight.get(session.id)
     if (running !== undefined) {
@@ -75,29 +89,27 @@ export function apply(ctx) {
       return running.work
     }
     const entry = { controller: new AbortController(), rerun: false }
-    const run = () => generate(session, entry.controller.signal)
-    entry.work = run()
-      .then((title) => (entry.rerun ? run() : title))
-      .finally(() => {
-        if (inflight.get(session.id) === entry) inflight.delete(session.id)
-      })
+    entry.work = (async () => {
+      let title
+      do {
+        entry.rerun = false
+        title = await generate(session, entry.controller.signal)
+      } while (entry.rerun)
+      return title
+    })().finally(() => {
+      if (inflight.get(session.id) === entry) inflight.delete(session.id)
+    })
     inflight.set(session.id, entry)
     return entry.work
   }
 
-  /** A title the user typed (user-sourced, and not the one this plugin set) wins over auto titles. */
-  const manuallyTitled = (session) => {
-    const current = ctx.sessionTitle.get(session)
-    return current?.source?.kind === 'user' && current.title !== lastSet.get(session.id)
-  }
-
   const endpoints = {
-    'settings.get': async () => settings,
+    'settings.get': async () => normalizeSettings(state),
     'settings.set': async (payload) => {
-      const next = normalizeSettings(payload)
-      writeSettings(path, next)
-      settings = next
-      return settings
+      const next = { ...state, ...normalizeSettings(payload) }
+      writeState(path, next)
+      state = next
+      return normalizeSettings(state)
     },
     'title.generate': async (payload) => {
       const session = ctx.sessions.get(String(payload?.sessionId ?? ''))
@@ -123,14 +135,16 @@ export function apply(ctx) {
   })
 
   ctx.on('session/event', (session, event) => {
-    if (!settings.autoTitle || event.type !== 'turn/end' || isSubagent(session)) return
+    if (!state.autoTitle || event.type !== 'turn/end' || isSubagent(session)) return
     clearTimeout(timers.get(session.id))
     timers.set(
       session.id,
       setTimeout(() => {
         timers.delete(session.id)
-        if (ctx.sessions.get(session.id) !== session || manuallyTitled(session)) return
-        generateOnce(session).catch((error) => ctx.logger?.warn?.('[dsh-beta-layout] auto title failed:', error))
+        if (!state.autoTitle || !isLive(session) || manuallyTitled(session)) return
+        generateOnce(session).catch((error) => {
+          if (isLive(session) && !isAbort(error)) ctx.logger?.warn?.('[dsh-beta-layout] auto title failed:', error)
+        })
       }, LIMITS.debounceMs)
     )
   })
@@ -138,14 +152,12 @@ export function apply(ctx) {
     clearTimeout(timers.get(session.id))
     timers.delete(session.id)
     inflight.get(session.id)?.controller.abort()
-    lastSet.delete(session.id)
   })
   ctx.effect(
     () => () => {
       for (const timer of timers.values()) clearTimeout(timer)
       timers.clear()
       for (const entry of inflight.values()) entry.controller.abort()
-      lastSet.clear()
     },
     'dsh-beta-layout: titles'
   )

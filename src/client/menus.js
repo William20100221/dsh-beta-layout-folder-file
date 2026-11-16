@@ -18,6 +18,7 @@ export function registerMenus(ctx, { store, actions, sessions, titles, t, overla
       order: MENU_ORDER.moveToFolder,
       observe: () => [store, ctx.locale],
       resolve: ({ workspaceId }) => {
+        if (!overlay.isRootWorkspace(workspaceId)) return [] // nested rows of the Workspace Tree view
         const state = store.get()
         const current = folderOf(state, workspaceId)
         const children = state.folders.map((folder) => ({
@@ -105,10 +106,23 @@ export function registerMenus(ctx, { store, actions, sessions, titles, t, overla
     'folder'
   )
 
-  /** Open the folder menu at a point; a second gesture on the same folder closes it, like DSH's rows. */
-  const openFolderMenu = (folderId, point) => {
-    const active = ctx.contextMenus.active?.getSnapshot?.() ?? null
-    if (active?.kind === FOLDER_TARGET && active.value?.folderId === folderId) ctx.contextMenus.close()
+  // The folder whose menu is open keeps its ⋯ shown, like DSH's rows do while their menu is open.
+  const active = ctx.contextMenus.active
+  if (typeof active?.subscribe === 'function') {
+    ctx.effect(
+      () =>
+        active.subscribe(() => {
+          const target = active.getSnapshot()
+          overlay.folders.setMenuOpen(target?.kind === FOLDER_TARGET ? target.value?.folderId : undefined)
+        }),
+      `${NS}: folder menu state`
+    )
+  }
+
+  /** Open the folder menu at a point. In 'toggle' mode (the ⋯ button) a second press closes it, as DSH's own ⋯ buttons do. */
+  const openFolderMenu = (folderId, point, mode) => {
+    const target = active?.getSnapshot?.() ?? null
+    if (mode === 'toggle' && target?.kind === FOLDER_TARGET && target.value?.folderId === folderId) ctx.contextMenus.close()
     else ctx.contextMenus.open({ kind: FOLDER_TARGET, value: { folderId } }, point)
   }
   return { openFolderMenu }

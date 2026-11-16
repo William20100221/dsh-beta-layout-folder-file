@@ -1,5 +1,5 @@
 import { LAYOUT, TIMING } from './constants.js'
-import { SEL, isSessionRow, isWorkspaceRow, scrollerOf, sectionOf, sessionIdOf, textOf, workspaceIdOf, wrapperOf } from './dsh-dom.js'
+import { SEL, isSessionRow, isWorkspaceRow, rowOfWrapper, scrollerOf, sectionOf, sessionIdOf, textOf, workspaceIdOf, wrapperOf } from './dsh-dom.js'
 import { folderOf } from './model.js'
 import { halfOf, nextSiblingSkipping } from './util.js'
 
@@ -8,7 +8,7 @@ import { halfOf, nextSiblingSkipping } from './util.js'
  * Capture-phase listeners on the document see every drag event before DSH does; DSH still decides where a
  * workspace or session row drops, this layer only mirrors that with a dashed slot and tells the actions
  * which folder the drop landed in. Folder headers (drag to reorder, drop target for workspaces) are
- * entirely this layer's.
+ * entirely this layer's. Nested rows of the Workspace Tree view are left to DSH.
  *   - pill drag image, dimmed list, the lifted row collapsing (CSS, see styles.js)
  *   - slot: a row-sized dashed gap inserted where the drop will land, so rows slide apart
  *   - spring-loaded folders: a collapsed folder opens after a short hover
@@ -27,6 +27,11 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
   ghost.className = 'dshcl-ghost'
   ghost.setAttribute('aria-hidden', 'true')
   doc.body.appendChild(ghost)
+  const setImage = (event) => {
+    try {
+      event.dataTransfer.setDragImage(ghost, ...LAYOUT.DRAG_IMAGE_OFFSET)
+    } catch {}
+  }
 
   // ---- the slot
   function placeSlot(parent, before) {
@@ -69,9 +74,11 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
   }
 
   // ---- auto-scroll
+  /** Scroll speed for a pointer in the band along the list's top or bottom edge, 0 beside the list. */
   function scrollDelta(event) {
     if (scroller === null) return 0
     const rect = scroller.getBoundingClientRect()
+    if (event.clientX < rect.left || event.clientX > rect.right) return 0
     const band = LAYOUT.AUTOSCROLL_BAND_PX
     if (event.clientY < rect.top + band) return -Math.min(LAYOUT.AUTOSCROLL_MAX_PX, (band - (event.clientY - rect.top)) * 0.4)
     if (event.clientY > rect.bottom - band) return Math.min(LAYOUT.AUTOSCROLL_MAX_PX, (band - (rect.bottom - event.clientY)) * 0.4)
@@ -89,9 +96,7 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
     ghost.textContent = label
     if (group) ghost.setAttribute('data-group', '')
     else ghost.removeAttribute('data-group')
-    try {
-      event.dataTransfer.setDragImage(ghost, ...LAYOUT.DRAG_IMAGE_OFFSET)
-    } catch {}
+    setImage(event)
     doc.body.classList.add('dshcl-dragging')
     const list = getList()
     scroller = list === null ? null : scrollerOf(list, win)
@@ -117,18 +122,17 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
   }
 
   // ---- folder blocks: this layer's own drop targets
-  /** A block accepts this plugin's folder and workspace drags, and DSH's workspace rows (text/plain) even if dragstart was missed. */
-  const blockAccepts = (event, folderId) =>
-    drag !== null ? drag.kind !== 'session' && !(drag.kind === 'folder' && drag.id === folderId) : event.dataTransfer.types.includes('text/plain')
+  /** A block takes workspaces, and other folders (to reorder). */
+  const blockAccepts = (folderId) => drag !== null && (drag.kind === 'workspace' || (drag.kind === 'folder' && drag.id !== folderId))
 
   function hoverBlock(event, block) {
+    autoScroll = scrollDelta(event)
     const folderId = block.dataset.dshclFolder
-    if (!blockAccepts(event, folderId)) return
+    if (!blockAccepts(folderId)) return
     event.preventDefault()
     event.stopPropagation()
     event.dataTransfer.dropEffect = 'move'
-    autoScroll = scrollDelta(event)
-    if (drag?.kind === 'folder') {
+    if (drag.kind === 'folder') {
       setOver(null)
       const half = halfOf(event, block)
       drag.over = { folderId, half }
@@ -142,14 +146,11 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
 
   function dropOnBlock(event, block) {
     const folderId = block.dataset.dshclFolder
-    if (!blockAccepts(event, folderId)) return
+    if (!blockAccepts(folderId)) return
     event.preventDefault()
     event.stopPropagation()
-    if (drag?.kind === 'folder') actions.reorderFolder(drag.id, folderId, halfOf(event, block))
-    else {
-      const id = drag?.kind === 'workspace' ? drag.id : event.dataTransfer.getData('text/plain')
-      if (id && orderSync.liveOrder().includes(id)) actions.moveToFolder(id, folderId, { id, before: null })
-    }
+    if (drag.kind === 'folder') actions.reorderFolder(drag.id, folderId, halfOf(event, block))
+    else actions.moveToFolder(drag.id, folderId, { id: drag.id, before: null })
     endDrag()
   }
 
@@ -157,6 +158,7 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
   const onDragStart = (event) => {
     const target = event.target instanceof Element ? event.target : null
     if (target === null) return
+    if (target.closest('.dshcl-rename') !== null) return event.preventDefault() // selecting text in a rename is not a drag
     const head = target.closest('.dshcl-folder')
     if (head !== null) {
       const folderId = folders.folderIdOf(head)
@@ -169,8 +171,14 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
     const list = getList()
     const row = target.closest(SEL.anyRow)
     if (list === null || row === null || !list.contains(row)) return
-    if (isWorkspaceRow(row)) beginDrag(event, { kind: 'workspace', id: workspaceIdOf(row), el: row }, labelOf('workspace', workspaceIdOf(row)) ?? textOf(row), true)
-    else if (isSessionRow(row)) beginDrag(event, { kind: 'session', id: sessionIdOf(row), el: row }, labelOf('session', sessionIdOf(row)) ?? textOf(row), false)
+    if (isWorkspaceRow(row)) {
+      const id = workspaceIdOf(row)
+      if (id !== '' && row.closest(SEL.group) === null) beginDrag(event, { kind: 'workspace', id, el: row }, labelOf('workspace', id) ?? textOf(row), true)
+    } else if (isSessionRow(row)) beginDrag(event, { kind: 'session', id: sessionIdOf(row), el: row }, labelOf('session', sessionIdOf(row)) ?? textOf(row), false)
+  }
+  /** DSH's own dragstart handler runs after the capture listener and sets a row clone as the image: the pill goes back on top. */
+  const onDragStartAfterDsh = (event) => {
+    if (drag !== null && !event.defaultPrevented) setImage(event)
   }
 
   /** Mirror DSH's drop position (top or bottom half of the target) with the slot. */
@@ -187,18 +195,24 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
     if (drag.kind === 'folder') return clearSlot()
     if (drag.kind === 'session') {
       const row = event.target.closest(SEL.sessionRow)
-      if (row === null || row === drag.el) return
+      // Forks sit under their source here but DSH orders by its own flat list: no slot over them.
+      if (row === null || row === drag.el || row.hasAttribute('data-dshcl-depth')) return
       const wrapper = wrapperOf(row)
       const section = wrapper.parentElement
       if (section === null || !section.contains(drag.el)) return // DSH only reorders within one workspace
-      placeSlot(section, halfOf(event, row) === 'before' ? wrapper : wrapper.nextSibling)
+      let after = wrapper.nextElementSibling // "after" a source means after its forks too
+      while (after !== null && (after === slot || rowOfWrapper(after)?.hasAttribute('data-dshcl-depth'))) after = after.nextElementSibling
+      placeSlot(section, halfOf(event, row) === 'before' ? wrapper : after)
       return
     }
     const section = sectionOf(event.target, list)
-    if (section === null || section === slot || section.contains(drag.el)) return
+    if (section === null || section.contains(drag.el)) return
     const half = halfOf(event, section)
     drag.over = { section, half }
     placeSlot(list, half === 'before' ? section : section.nextSibling)
+  }
+  const onDragLeave = (event) => {
+    if (event.relatedTarget === null) autoScroll = 0 // the pointer left the window
   }
 
   /**
@@ -226,7 +240,8 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
     // Same rule as DSH's drop: before the target, or before whatever follows it.
     const half = drag.over?.section === section ? drag.over.half : halfOf(event, section)
     const nextRow = half === 'before' ? row : (nextSiblingSkipping(section, 'dshcl-slot')?.querySelector(SEL.workspaceRow) ?? null)
-    actions.moveToFolder(drag.id, folderOf(store.get(), target)?.id ?? null, { id: drag.id, before: nextRow === null ? null : workspaceIdOf(nextRow) })
+    const before = nextRow === null ? null : workspaceIdOf(nextRow)
+    actions.moveToFolder(drag.id, folderOf(store.get(), target)?.id ?? null, { id: drag.id, before: before === '' ? null : before })
   }
 
   const onDragEnd = () => {
@@ -234,8 +249,10 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
   }
 
   doc.addEventListener('dragstart', onDragStart, true)
+  doc.addEventListener('dragstart', onDragStartAfterDsh)
   doc.addEventListener('dragenter', onDragOver, true)
   doc.addEventListener('dragover', onDragOver, true)
+  doc.addEventListener('dragleave', onDragLeave, true)
   doc.addEventListener('drop', onDrop, true)
   doc.addEventListener('dragend', onDragEnd, true)
 
@@ -244,8 +261,10 @@ export function createDrag({ doc, win, getList, folders, actions, store, orderSy
     dispose: () => {
       if (drag !== null) endDrag()
       doc.removeEventListener('dragstart', onDragStart, true)
+      doc.removeEventListener('dragstart', onDragStartAfterDsh)
       doc.removeEventListener('dragenter', onDragOver, true)
       doc.removeEventListener('dragover', onDragOver, true)
+      doc.removeEventListener('dragleave', onDragLeave, true)
       doc.removeEventListener('drop', onDrop, true)
       doc.removeEventListener('dragend', onDragEnd, true)
       ghost.remove()

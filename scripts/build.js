@@ -27,7 +27,7 @@ const IMPORT = /^import\s+(?:[^'"]*?\s+from\s+)?['"]([^'"]+)['"]\s*;?\s*$/gm
 /** Modules in dependency order (imports first), each read once. */
 function collect(file, seen = new Map()) {
   if (seen.has(file)) return seen
-  const source = readFileSync(file, 'utf8')
+  const source = readFileSync(file, 'utf8').replace(/\r\n/g, '\n') // a CRLF checkout builds the same bundle
   seen.set(file, null) // mark: in progress
   for (const match of source.matchAll(IMPORT)) {
     const spec = match[1]

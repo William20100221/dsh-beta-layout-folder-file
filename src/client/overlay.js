@@ -25,24 +25,30 @@ export function createOverlay({ doc, win, storage, workspaces, sessions, store, 
   disposers.push(() => style.remove())
 
   const getList = () => (parts.list?.isConnected ? parts.list : (parts = findParts(doc)).list)
+  /** Root workspace sections of the live list; empty in the collapsed rail and in search results. */
+  const rootSections = () => {
+    const list = getList()
+    return list === null ? [] : sectionsOf(list)
+  }
 
   const folders = createFolders({
     doc,
     store,
     t,
     actions,
-    openMenu: (folderId, point) => openMenu(folderId, point),
+    openMenu: (folderId, point, mode) => openMenu(folderId, point, mode),
     onAddWorkspace: (folderId) => addWorkspaceTo(folderId),
-    onNewFolder: () => newFolder()
+    onNewFolder: () => newFolder(),
+    onRenameEnd: () => syncSoon()
   })
 
   // ---- the main pass; mutation-free when nothing changed
   function sync() {
     parts = findParts(doc)
     const { header, list } = parts
-    if (header !== null) folders.ensureHeaderButton(header)
     const state = store.get()
     const sections = list === null ? [] : sectionsOf(list)
+    if (header !== null) folders.ensureHeaderButton(header, sections.length > 0)
     if (list === null || sections.length === 0) {
       folders.removeAll()
       onboard?.remove()
@@ -86,7 +92,9 @@ export function createOverlay({ doc, win, storage, workspaces, sessions, store, 
   }
 
   // ---- folder commands that need the DOM
+  /** A new folder, named right away; nothing when there is no list to show it in. */
   function newFolder(workspaceId) {
+    if (rootSections().length === 0) return undefined
     const id = actions.createFolder(t('newFolder'), workspaceId)
     sync()
     folders.startRename(id)
@@ -161,6 +169,8 @@ export function createOverlay({ doc, win, storage, workspaces, sessions, store, 
   return {
     folders,
     getList,
+    /** Whether `workspaceId` is a root workspace of the live list (nested Workspace Tree rows cannot join folders). */
+    isRootWorkspace: (workspaceId) => rootSections().some((section) => section.id === workspaceId),
     sync,
     newFolder,
     renameFolder: (folderId) => folders.startRename(folderId),

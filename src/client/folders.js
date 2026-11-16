@@ -9,7 +9,7 @@ import { nextSiblingSkipping, toggleAttr } from './util.js'
  *     <div class="dshcl-hint">Drag workspaces here</div>          (only while the folder is empty)
  * Drag events on headers are handled by drag.js; everything else about a header lives here.
  */
-export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace, onNewFolder }) {
+export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace, onNewFolder, onRenameEnd }) {
   const blocks = new Map()
 
   function makeBlock(folderId) {
@@ -17,12 +17,14 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
     block.className = 'dshcl-block'
     block.setAttribute('role', 'none')
     block.dataset.dshclFolder = folderId
+    // data-context-menu-trigger: DSH's menu service leaves its menu open for a press on a trigger, so a second
+    // press on ⋯ reaches open() and toggles the menu closed, the way DSH's own ⋯ buttons do.
     block.innerHTML =
       `<div class="dshcl-folder" role="treeitem" aria-level="1" tabindex="0" draggable="true" aria-labelledby="dshcl-t-${folderId}">` +
       `<span class="dshcl-folder-icon" aria-hidden="true"></span><span class="dshcl-folder-title" id="dshcl-t-${folderId}"></span>` +
       `<span class="dshcl-caret" aria-hidden="true">${SVG.caret}</span><span class="dshcl-spacer"></span><span class="dshcl-count"></span>` +
       `<span class="dshcl-acts"><button type="button" class="dshcl-btn dshcl-add">${SVG.plus}</button>` +
-      `<button type="button" class="dshcl-btn dshcl-more" aria-haspopup="menu">${SVG.ellipsis}</button></span></div>` +
+      `<button type="button" class="dshcl-btn dshcl-more" aria-haspopup="menu" data-context-menu-trigger="">${SVG.ellipsis}</button></span></div>` +
       '<div class="dshcl-hint" role="none"></div>'
     const head = block.firstChild
     const onButton = (event) => event.target instanceof Element && event.target.closest('button, input') !== null
@@ -50,10 +52,13 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
       event.stopPropagation()
       openMenu(folderId, { x: event.clientX, y: event.clientY })
     })
+    // A press on a button is the button's alone: DSH's sidebar closes an open menu on any pointerdown that
+    // reaches it (its own ⋯ buttons stop the event the same way), and the header must not start a drag.
+    for (const button of block.querySelectorAll('.dshcl-btn')) button.addEventListener('pointerdown', (event) => event.stopPropagation())
     block.querySelector('.dshcl-more').addEventListener('click', (event) => {
       event.stopPropagation()
       const rect = event.currentTarget.getBoundingClientRect()
-      openMenu(folderId, { x: rect.left, y: rect.bottom })
+      openMenu(folderId, { x: rect.left, y: rect.bottom }, 'toggle')
     })
     block.querySelector('.dshcl-add').addEventListener('click', (event) => {
       event.stopPropagation()
@@ -62,9 +67,11 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
     return block
   }
 
+  const renaming = (block) => block.querySelector('.dshcl-rename') !== null
+
   function paint(block, folder) {
     const sig = JSON.stringify([folder.title, folder.collapsed, folder.members.length, t('more')])
-    if (block.dataset.sig === sig || block.querySelector('.dshcl-rename') !== null) return
+    if (block.dataset.sig === sig || renaming(block)) return
     block.dataset.sig = sig
     const { icon, text } = splitIcon(folder.title)
     block.querySelector('.dshcl-folder-icon').textContent = icon
@@ -88,12 +95,16 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
     toggleAttr(block, 'data-empty', folder.members.length === 0)
   }
 
-  /** Swap the title for an input; Enter commits, Escape cancels, focus returns to the header. */
+  /**
+   * Swap the title for an input; Enter commits, Escape cancels, focus returns to the header. The header is
+   * not draggable meanwhile, and placeAll leaves the block where it is (moving it would blur the input).
+   */
   function startRename(folderId) {
     const block = blocks.get(folderId)
     const folder = actions.folder(folderId)
     const title = block?.querySelector('.dshcl-folder-title') ?? null
-    if (block === undefined || folder === undefined || title === null) return
+    if (block === undefined || folder === undefined || title === null || renaming(block)) return
+    const head = block.firstChild
     const input = doc.createElement('input')
     input.className = 'dshcl-rename'
     input.value = folder.title
@@ -103,10 +114,12 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
       if (done) return
       done = true
       input.replaceWith(title)
+      head.draggable = true
       block.dataset.sig = ''
       if (commit) actions.renameFolder(folderId, input.value)
       else paint(block, folder)
-      if (doc.activeElement === doc.body || doc.activeElement === null) block.firstChild.focus({ preventScroll: true })
+      if (doc.activeElement === doc.body || doc.activeElement === null) head.focus({ preventScroll: true })
+      onRenameEnd?.()
     }
     input.addEventListener('keydown', (event) => {
       event.stopPropagation()
@@ -114,7 +127,8 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
       if (event.key === 'Escape') finish(false)
     })
     input.addEventListener('blur', () => finish(true))
-    for (const type of ['click', 'dblclick', 'pointerdown', 'dragstart', 'contextmenu']) input.addEventListener(type, (event) => event.stopPropagation())
+    for (const type of ['click', 'dblclick', 'pointerdown', 'contextmenu']) input.addEventListener(type, (event) => event.stopPropagation())
+    head.draggable = false
     title.replaceWith(input)
     input.focus()
     input.select()
@@ -124,7 +138,7 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
    * Put every folder's block in place. A header goes before its first member; an empty folder goes before
    * the next folder's header, or before the first loose workspace. Placed last to first so two empty
    * folders never chase each other. Mutation-free when nothing moved. With `place` false (mid-drag)
-   * headers are only repainted, never moved.
+   * headers are only repainted, never moved; so is a header being renamed.
    */
   function placeAll(list, sections, state, { place = true } = {}) {
     const memberOf = new Map()
@@ -140,28 +154,35 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
       let block = blocks.get(folder.id)
       if (block === undefined) blocks.set(folder.id, (block = makeBlock(folder.id)))
       paint(block, folder)
-      if (!place) continue
-      const anchor =
-        sections.find((s) => folder.members.includes(s.id))?.section ?? nextBlock ?? sections.find((s) => !memberOf.has(s.id))?.section ?? null
-      if (block.parentElement !== list || nextSiblingSkipping(block, 'dshcl-slot') !== anchor) list.insertBefore(block, anchor)
+      if (place && !renaming(block)) {
+        const anchor =
+          sections.find((s) => folder.members.includes(s.id))?.section ?? nextBlock ?? sections.find((s) => !memberOf.has(s.id))?.section ?? null
+        if (block.parentElement !== list || nextSiblingSkipping(block, 'dshcl-slot') !== anchor) list.insertBefore(block, anchor)
+      }
       nextBlock = block
     }
   }
 
-  /** The folder-plus button in DSH's Workspaces header, beside its action box (which is fixed-width and would clip). */
-  function ensureHeaderButton(header) {
-    if (header.querySelector('.dshcl-new-folder') !== null) return
-    const actionsBox = [...header.children].find((child) => child.querySelector('button') !== null && child.querySelector('input') === null)
-    if (actionsBox === undefined) return
-    const add = [...actionsBox.children].reverse().find((child) => child.tagName === 'BUTTON') ?? null
-    const button = doc.createElement('button')
-    button.type = 'button'
-    button.className = 'dshcl-new-folder ' + (add?.className ?? 'dshcl-btn')
-    button.setAttribute('aria-label', t('newFolder'))
-    button.title = t('newFolder')
-    button.innerHTML = SVG.folderPlus
-    button.addEventListener('click', () => onNewFolder())
-    header.insertBefore(button, actionsBox)
+  /**
+   * The folder-plus button in DSH's Workspaces header, beside its action box (which is fixed-width and would
+   * clip). Hidden while there is no list to put a folder in (collapsed rail, search results).
+   */
+  function ensureHeaderButton(header, enabled) {
+    let button = header.querySelector('.dshcl-new-folder')
+    if (button === null) {
+      const actionsBox = [...header.children].find((child) => child.querySelector('button') !== null && child.querySelector('input') === null)
+      if (actionsBox === undefined) return
+      const add = [...actionsBox.children].reverse().find((child) => child.tagName === 'BUTTON') ?? null
+      button = doc.createElement('button')
+      button.type = 'button'
+      button.className = 'dshcl-new-folder ' + (add?.className ?? 'dshcl-btn')
+      button.setAttribute('aria-label', t('newFolder'))
+      button.title = t('newFolder')
+      button.innerHTML = SVG.folderPlus
+      button.addEventListener('click', () => onNewFolder())
+      header.insertBefore(button, actionsBox)
+    }
+    toggleAttr(button, 'hidden', !enabled)
   }
 
   return {
@@ -170,6 +191,10 @@ export function createFolders({ doc, store, t, actions, openMenu, onAddWorkspace
     ensureHeaderButton,
     blockOf: (folderId) => blocks.get(folderId),
     folderIdOf: (el) => el.closest('.dshcl-block')?.dataset.dshclFolder,
+    /** Mirror DSH's menu-open row state: the folder whose menu is open keeps its action buttons shown. */
+    setMenuOpen: (folderId) => {
+      for (const [id, block] of blocks) toggleAttr(block, 'data-menu', id === folderId)
+    },
     removeAll: () => {
       for (const block of blocks.values()) block.remove()
     },

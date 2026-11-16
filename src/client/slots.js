@@ -16,13 +16,14 @@ function FolderPlusIcon() {
   )
 }
 
-function SettingsForm({ t, view }) {
+/** The one setting: auto titles. Shown as the host reports it, so a failed save falls back to the saved value. */
+function SettingsForm({ t }) {
   const h = React.createElement
   const [auto, setAuto] = React.useState(null)
+  const apply = (promise) => promise.then((value) => setAuto(value.autoTitle === true), () => rpc('settings.get').then((value) => setAuto(value.autoTitle === true), () => setAuto(false)))
   React.useEffect(() => {
-    rpc('settings.get').then((value) => setAuto(value.autoTitle === true), () => setAuto(false))
+    apply(rpc('settings.get'))
   }, [])
-  if (view === 'summary') return t('summary')
   return h(
     'div',
     { className: 'dshcl-settings' },
@@ -36,7 +37,7 @@ function SettingsForm({ t, view }) {
         onChange: (event) => {
           const next = event.target.checked
           setAuto(next)
-          rpc('settings.set', { autoTitle: next }).catch(() => setAuto(!next))
+          apply(rpc('settings.set', { autoTitle: next }))
         }
       }),
       t('autoTitle')

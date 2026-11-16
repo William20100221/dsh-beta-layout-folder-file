@@ -4,7 +4,8 @@ import { createSignal } from './store.js'
 
 /**
  * Session actions behind the ⋯ menu: Generate title (through the host half) and Export as ZIP (DSH's own
- * route). `running` is a snapshot store of session ids being titled, so the menu can show progress.
+ * route). `running` is a snapshot store of session ids being titled; the menu row shows the progress, so no
+ * toast is raised until the result (a toast would also evict a pending Undo).
  */
 export function createTitles({ doc, sessions, notify, t }) {
   const running = createSignal(new Set())
@@ -18,7 +19,6 @@ export function createTitles({ doc, sessions, notify, t }) {
   function generate(sessionId) {
     if (running.get().has(sessionId)) return Promise.resolve()
     mark(sessionId, true)
-    notify(t('generating'), true)
     // `using` keeps the session loaded on the Host while the title is generated; it returns the callback's value.
     return sessions
       .using(sessionId, { source: 'workspaceOperation' }, () => rpc('title.generate', { sessionId }))

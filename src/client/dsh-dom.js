@@ -9,8 +9,9 @@
 //       <span>                             hover-card anchor
 //         <div data-row-key="workspace:ID" role="treeitem" draggable>  the workspace row
 //       <div role="group">…</div>          nested workspaces (Workspace Tree view) — left alone
-//       <span><div data-row-key="session:ID" tabindex="0" draggable>  one wrapper + row per session
+//       <span><div data-row-key="session:ID" tabindex="0" draggable aria-selected>  one wrapper + row per session
 //       <button data-row-key="overflow:KEY">Show more</button>
+//   The Workspace Tree view's "Ungrouped" bucket is a section whose row key is "workspace:" (empty id).
 // Functions take elements and return elements; nothing here touches the document at import time.
 
 export const SEL = {
@@ -20,6 +21,7 @@ export const SEL = {
   anyRow: '[data-row-key]',
   workspaceRow: '[data-row-key^="workspace:"]',
   sessionRow: '[data-row-key^="session:"]',
+  selectedRow: '[data-row-key^="session:"][aria-selected="true"]',
   /** The row's title span: DSH's CSS-module class is hashed (`<hash>_title`), its local name is stable. */
   title: '[class*="_title"]',
   directoryFlow: '[data-slot="sidebar.workspaces.directoryFlow"]'
@@ -51,19 +53,24 @@ export function findParts(doc) {
   return { header, root, list }
 }
 
+/** The root workspace row of a list child, or null for the Ungrouped bucket and this plugin's own elements. */
+const rootRowOf = (section) => {
+  const row = section.querySelector(SEL.workspaceRow) // the root row's wrapper precedes any nested group
+  return row !== null && workspaceIdOf(row) !== '' && row.closest(SEL.group) === null ? row : null
+}
+
 /** The root-level workspace section an element belongs to, or null. */
 export function sectionOf(el, list) {
   const section = el.closest(SEL.section)
-  return section !== null && section.parentElement === list ? section : null
+  return section !== null && section.parentElement === list && rootRowOf(section) !== null ? section : null
 }
 
 /** Root-level workspace sections in DOM order, with their row and workspace id. */
 export function sectionsOf(list) {
   const out = []
-  for (const row of list.querySelectorAll(SEL.workspaceRow)) {
-    const section = sectionOf(row, list)
-    if (section === null || row.closest(SEL.group) !== null) continue
-    out.push({ id: workspaceIdOf(row), section, row })
+  for (const section of list.children) {
+    const row = rootRowOf(section)
+    if (row !== null) out.push({ id: workspaceIdOf(row), section, row })
   }
   return out
 }
@@ -74,11 +81,14 @@ export function wrapperOf(row) {
   return parent !== null && parent.matches(SEL.section) ? row : parent
 }
 
+/** The session row of a section child (the row itself, or inside its wrapper), or null. */
+export const rowOfWrapper = (el) => (el.matches(SEL.sessionRow) ? el : el.querySelector(`:scope > ${SEL.sessionRow}`))
+
 /** Session rows of one section with their wrappers, in DOM order. */
 export function sessionWrappers(section) {
   const out = []
   for (const el of section.children) {
-    const row = el.matches(SEL.sessionRow) ? el : el.querySelector(`:scope > ${SEL.sessionRow}`)
+    const row = rowOfWrapper(el)
     if (row !== null) out.push({ el, row })
   }
   return out

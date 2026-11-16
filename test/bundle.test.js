@@ -2,12 +2,13 @@ import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
 import { readFileSync } from 'node:fs'
+import { fileURLToPath } from 'node:url'
 
 // The one test of the loader format: lib/client.js must be what scripts/build.js produces from src/client/,
 // and it must load the way DSH's shell loads it, with only the shared modules available.
 
 test('lib/client.js is built from src/client', () => {
-  execFileSync(process.execPath, [new URL('../scripts/build.js', import.meta.url).pathname.replace(/^\/([A-Z]:)/, '$1'), '--check'], { stdio: 'pipe' })
+  execFileSync(process.execPath, [fileURLToPath(new URL('../scripts/build.js', import.meta.url)), '--check'], { stdio: 'pipe' })
 })
 
 test('the bundle registers with the module loader and exports the plugin body', () => {

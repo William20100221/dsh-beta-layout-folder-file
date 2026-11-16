@@ -63,7 +63,7 @@ Then **restart DeepSeek Harness**: quit it from the tray icon and open it again.
 No. It only changes how workspaces are grouped and ordered in the sidebar, and chat titles when you ask it to (or turn on auto titles).
 
 **Where is everything saved?**
-Folders are saved in the app on this computer. Workspace order is saved by DSH itself, so other DSH screens, like the workspace picker, use the same order. The auto-title switch is saved in `~/.dsh/dsh-beta-layout-folder-file.json`.
+Folders are saved in the app on this computer. Workspace order is saved by DSH itself, so other DSH screens, like the workspace picker, use the same order. The auto-title switch, and the last title the plugin gave each session (so a title you typed yourself is recognised and left alone), are saved in `~/.dsh/dsh-beta-layout-folder-file.json`.
 
 **"Generate title" says there's nothing to summarise.**
 The chat needs at least one message and reply first, so the plugin knows which model to ask.
